@@ -1,0 +1,559 @@
+"""
+Kioku — 轻量级叙事记忆引擎 (sidecar)
+SMTS 写作记忆层，HTTP API 桥接 Python 侧
+
+架构：FastAPI + SQLite (FTS5) + 实体关系图 (dict)
+端口：49152
+项目：单服务多项目，每个请求带 project_id
+"""
+
+import argparse
+import hashlib
+import json
+import os
+import sqlite3
+import time
+import sys
+from typing import Optional
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException
+
+# pydantic 兼容：v2 直接用，v1 在 3.12 下由 apt 包提供
+try:
+    from pydantic import BaseModel
+except ImportError:
+    from pydantic.v1 import BaseModel  # pydantic v1 fallback
+
+# ---------------------------------------------------------------------------
+# 数据模型
+# ---------------------------------------------------------------------------
+
+class AddRequest(BaseModel):
+    project_id: str
+    memory: str
+    node_type: str = "episodic"  # episodic | veridical
+    entities: list[str] = []
+    chapter: int = 0
+    emotion: str = ""
+    importance: float = 0.5
+    category: str = "event"  # 角色状态|事件|场景|关系变化
+
+class SearchRequest(BaseModel):
+    project_id: str
+    query: str
+    top_k: int = 20
+    exclude_chapters: list[int] = []
+    weights: Optional[dict[str, float]] = None  # 实体 -> 权重加成
+
+class AddResponse(BaseModel):
+    id: int
+    hash: str
+    deduped: bool
+
+class SearchResult(BaseModel):
+    id: int
+    memory: str
+    node_type: str
+    chapter: int
+    entities: list[str]
+    importance: float
+    category: str
+    score: float
+
+class SearchResponse(BaseModel):
+    results: list[SearchResult]
+
+class EntityGraphResponse(BaseModel):
+    entities: dict
+
+class StatusResponse(BaseModel):
+    status: str
+    memory_count: int
+
+# ---------------------------------------------------------------------------
+# 数据库管理
+# ---------------------------------------------------------------------------
+
+DB_SCHEMA = """
+CREATE TABLE IF NOT EXISTS memories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content_hash TEXT UNIQUE NOT NULL,
+    memory TEXT NOT NULL,
+    node_type TEXT NOT NULL DEFAULT 'episodic',
+    chapter INTEGER NOT NULL DEFAULT 0,
+    emotion TEXT DEFAULT '',
+    importance REAL DEFAULT 0.5,
+    category TEXT DEFAULT 'event',
+    entities TEXT DEFAULT '[]',
+    embedding BLOB DEFAULT NULL,
+    created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_memories_hash ON memories(content_hash);
+CREATE INDEX IF NOT EXISTS idx_memories_chapter ON memories(chapter);
+"""
+
+FTS5_SCHEMA = """
+CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+    memory, chapter, category,
+    content='memories', content_rowid='id'
+);
+"""
+
+FTS5_TRIGGERS = """
+CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
+    INSERT INTO memories_fts(rowid, memory, chapter, category)
+    VALUES (new.id, new.memory, new.chapter, new.category);
+END;
+
+CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
+    INSERT INTO memories_fts(memories_fts, rowid, memory, chapter, category)
+    VALUES ('delete', old.id, old.memory, old.chapter, old.category);
+END;
+"""
+
+
+class ProjectDB:
+    """每个项目独立的 SQLite 数据库"""
+
+    def __init__(self, data_root: str, project_id: str):
+        self.project_id = project_id
+        mem0_dir = os.path.join(data_root, project_id, ".mem0")
+        os.makedirs(mem0_dir, exist_ok=True)
+
+        self.db_path = os.path.join(mem0_dir, "memories.db")
+        self.graph_path = os.path.join(mem0_dir, "entity_graph.json")
+
+        self._init_db()
+
+    def _init_db(self):
+        """初始化数据库表结构"""
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+
+        # 表结构
+        conn.executescript(DB_SCHEMA)
+
+        # FTS5
+        conn.executescript(FTS5_SCHEMA)
+        conn.executescript(FTS5_TRIGGERS)
+
+        conn.commit()
+        conn.close()
+
+    def _get_conn(self):
+        return sqlite3.connect(self.db_path)
+
+    def add_memory(self, memory: str, node_type: str, entities: list[str],
+                   chapter: int, emotion: str, importance: float,
+                   category: str) -> tuple[int, str, bool]:
+        """写入记忆，带 hash 去重 + embedding。返回 (id, hash, deduped)"""
+        content_hash = hashlib.md5(
+            f"{memory}|{chapter}|{node_type}".encode()
+        ).hexdigest()
+
+        conn = self._get_conn()
+        try:
+            # 查重
+            existing = conn.execute(
+                "SELECT id FROM memories WHERE content_hash = ?",
+                (content_hash,)
+            ).fetchone()
+            if existing:
+                conn.close()
+                return existing[0], content_hash, True
+
+            # 计算 embedding
+            emb = embed_text(memory)
+            emb_blob = embed_to_blob(emb) if emb else None
+
+            # 写入
+            now = time.time()
+            entities_json = json.dumps(entities, ensure_ascii=False)
+            cur = conn.execute(
+                """INSERT INTO memories
+                   (content_hash, memory, node_type, chapter, emotion,
+                    importance, category, entities, embedding, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (content_hash, memory, node_type, chapter, emotion,
+                 importance, category, entities_json, emb_blob, now)
+            )
+            mem_id = cur.lastrowid
+            conn.commit()
+            conn.close()
+            return mem_id, content_hash, False
+        except Exception:
+            conn.close()
+            raise
+
+    def search_bm25(self, query: str, top_k: int,
+                    exclude_chapters: list[int]) -> list[dict]:
+        """混合搜索：关键词OR → 语义评分 → importance 加权"""
+
+        query_emb = embed_text(query)
+        keywords = [kw.strip() for kw in query.split() if kw.strip()]
+
+        # 权重
+        W_SEMANTIC = 0.6
+        W_KEYWORD = 0.2
+        W_IMPORTANCE = 0.2
+
+        conn = self._get_conn()
+        try:
+            # 两阶段搜索：
+            # 1) 关键词OR匹配
+            if keywords:
+                conditions = ' OR '.join(["m.memory LIKE ?"] * len(keywords))
+                params = [f"%{kw}%" for kw in keywords]
+                sql = f"""
+                    SELECT m.id, m.memory, m.node_type, m.chapter,
+                           m.entities, m.importance, m.category, m.embedding
+                    FROM memories m
+                    WHERE {conditions}
+                """
+                rows = conn.execute(sql + " ORDER BY m.importance DESC LIMIT ?",
+                                    params + [top_k * 3]).fetchall()
+            else:
+                rows = []
+
+            # 2) 关键词没结果时全量扫描走语义
+            if not rows and query_emb is not None:
+                sql = """
+                    SELECT m.id, m.memory, m.node_type, m.chapter,
+                           m.entities, m.importance, m.category, m.embedding
+                    FROM memories m
+                """
+                params = []
+                if exclude_chapters:
+                    placeholders = ','.join('?' * len(exclude_chapters))
+                    sql += f" WHERE m.chapter NOT IN ({placeholders})"
+                    params.extend(exclude_chapters)
+                sql += " ORDER BY m.importance DESC LIMIT ?"
+                rows = conn.execute(sql, params + [top_k * 3]).fetchall()
+
+            if not rows:
+                return []
+
+            # 评分
+            exclude_set = set(exclude_chapters)
+            results = []
+            for row in rows:
+                if row[3] in exclude_set:
+                    continue
+
+                memory_text = row[1] or ""
+
+                # 关键词分
+                kw_score = sum(memory_text.count(kw) for kw in keywords)
+
+                # 语义分
+                semantic_score = 0.0
+                emb_blob = row[7]
+                if query_emb is not None and emb_blob is not None and len(emb_blob) > 4:
+                    try:
+                        stored_emb = blob_to_embed(emb_blob)
+                        if len(stored_emb) == len(query_emb):
+                            semantic_score = max(cosine_similarity(query_emb, stored_emb), 0.0)
+                    except Exception:
+                        pass
+
+                # 混合：语义为主，降级时仅关键词+importance
+                has_semantic = semantic_score > 0
+                if has_semantic:
+                    kw_norm = min(kw_score, 3.0) / 3.0 if keywords else 0
+                    score = (semantic_score * W_SEMANTIC +
+                             kw_norm * W_KEYWORD +
+                             min(row[5], 1.0) * W_IMPORTANCE)
+                else:
+                    # 无embedding：关键词+importance
+                    kw_norm = min(kw_score, 3.0) / 3.0 if keywords else 0
+                    score = kw_norm * 0.5 + min(row[5], 1.0) * 0.5
+
+                results.append({
+                    "id": row[0],
+                    "memory": memory_text,
+                    "node_type": row[2],
+                    "chapter": row[3],
+                    "entities": json.loads(row[4]) if row[4] else [],
+                    "importance": row[5],
+                    "category": row[6],
+                    "score": round(score, 4),
+                })
+
+            results.sort(key=lambda x: x["score"], reverse=True)
+
+            # 有语义分时用0.3阈值，否则不过滤
+            threshold = 0.3 if query_emb is not None else 0.0
+            return [r for r in results if r["score"] > threshold][:top_k]
+        finally:
+            conn.close()
+
+    def count(self) -> int:
+        conn = self._get_conn()
+        try:
+            row = conn.execute("SELECT COUNT(*) FROM memories").fetchone()
+            return row[0] if row else 0
+        finally:
+            conn.close()
+
+    # ---- 实体关系图 ----
+
+    def _load_graph(self) -> dict:
+        if os.path.exists(self.graph_path):
+            try:
+                with open(self.graph_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, OSError):
+                pass
+        return {}
+
+    def _save_graph(self, graph: dict):
+        with open(self.graph_path, 'w', encoding='utf-8') as f:
+            json.dump(graph, f, ensure_ascii=False, indent=2)
+
+    def update_entity_graph(self, entities: list[str], chapter: int):
+        """更新实体关系图"""
+        graph = self._load_graph()
+        for entity in entities:
+            if entity not in graph:
+                graph[entity] = {
+                    "related": [],
+                    "relations": {},
+                    "last_seen": chapter,
+                    "mention_count": 1
+                }
+            else:
+                info = graph[entity]
+                info["last_seen"] = max(info["last_seen"], chapter)
+                info["mention_count"] += 1
+
+            # 实体间互相关联
+            for other in entities:
+                if other != entity and other not in graph[entity]["related"]:
+                    graph[entity]["related"].append(other)
+
+        self._save_graph(graph)
+
+    def get_entity_graph(self) -> dict:
+        return self._load_graph()
+
+    def delete_memory(self, mem_id: int) -> bool:
+        conn = self._get_conn()
+        try:
+            # Delete from FTS5 first
+            conn.execute("INSERT INTO memories_fts(memories_fts, rowid) VALUES ('delete', ?)", (mem_id,))
+            conn.execute("DELETE FROM memories WHERE id = ?", (mem_id,))
+            conn.commit()
+            return conn.total_changes > 0
+        finally:
+            conn.close()
+
+
+# ---- 嵌入模型 ----
+
+_embedder = None
+_embedder_dim = 384  # BGE Small 默认维度
+
+
+def get_embedder():
+    global _embedder
+    if _embedder is None:
+        try:
+            from sentence_transformers import SentenceTransformer
+            _embedder = SentenceTransformer("BAAI/bge-small-zh-v1.5")
+            _embedder_dim = _embedder.get_sentence_embedding_dimension()
+        except Exception as e:
+            print(f" [Kioku] Embedding model unavailable: {e}", file=sys.stderr)
+    return _embedder
+
+
+def embed_text(text: str) -> Optional[list[float]]:
+    """返回归一化后的向量"""
+    model = get_embedder()
+    if model is None:
+        return None
+    emb = model.encode(text, normalize_embeddings=True)
+    return emb.tolist()
+
+
+def cosine_similarity(a: list[float], b: list[float]) -> float:
+    """余弦相似度（已归一化向量直接点积）"""
+    return sum(x * y for x, y in zip(a, b))
+
+
+def embed_to_blob(vec: list[float]) -> bytes:
+    import struct
+    return struct.pack(f"{len(vec)}f", *vec)
+
+
+def blob_to_embed(blob: bytes) -> list[float]:
+    import struct
+    count = len(blob) // 4
+    return list(struct.unpack(f"{count}f", blob))
+
+
+# ---------------------------------------------------------------------------
+# FastAPI 应用
+# ---------------------------------------------------------------------------
+
+# 全局状态
+data_root: str = ""
+dbs: dict[str, ProjectDB] = {}
+
+
+def get_db(project_id: str) -> ProjectDB:
+    if project_id not in dbs:
+        dbs[project_id] = ProjectDB(data_root, project_id)
+    return dbs[project_id]
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 启动
+    yield
+    # 关闭：清理
+    dbs.clear()
+
+
+app = FastAPI(title="Kioku Memory Engine", version="0.1.0", lifespan=lifespan)
+
+
+@app.get("/health")
+def health():
+    return StatusResponse(status="ok", memory_count=0)
+
+
+@app.post("/api/add", response_model=AddResponse)
+def add_memory(req: AddRequest):
+    db = get_db(req.project_id)
+    try:
+        mem_id, mem_hash, deduped = db.add_memory(
+            memory=req.memory,
+            node_type=req.node_type,
+            entities=req.entities,
+            chapter=req.chapter,
+            emotion=req.emotion,
+            importance=req.importance,
+            category=req.category,
+        )
+        # 更新实体图（非必要）
+        if not deduped and req.entities:
+            try:
+                db.update_entity_graph(req.entities, req.chapter)
+            except Exception:
+                pass
+
+        return AddResponse(id=mem_id, hash=mem_hash, deduped=deduped)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/search", response_model=SearchResponse)
+def search_memory(req: SearchRequest):
+    db = get_db(req.project_id)
+    try:
+        results = db.search_bm25(
+            query=req.query,
+            top_k=req.top_k,
+            exclude_chapters=req.exclude_chapters,
+        )
+
+        # 可选：实体权重加权
+        if req.weights and results:
+            for r in results:
+                entity_bonus = 0.0
+                for ent in r["entities"]:
+                    if ent in req.weights:
+                        entity_bonus += req.weights[ent] * 0.2
+                r["score"] = r["score"] * (1.0 + entity_bonus)
+
+            results.sort(key=lambda x: x["score"], reverse=True)
+            results = results[:req.top_k]
+
+        return SearchResponse(
+            results=[SearchResult(**r) for r in results]
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/entity_graph/{project_id}", response_model=EntityGraphResponse)
+def get_entity_graph(project_id: str):
+    db = get_db(project_id)
+    return EntityGraphResponse(entities=db.get_entity_graph())
+
+
+@app.get("/api/memories/{project_id}")
+def list_memories(project_id: str, limit: int = 100, offset: int = 0):
+    db = get_db(project_id)
+    try:
+        rows = db._get_conn().execute(
+            "SELECT id, memory, node_type, chapter, entities, importance, category, created_at "
+            "FROM memories ORDER BY chapter DESC, id DESC LIMIT ? OFFSET ?",
+            (limit, offset)
+        ).fetchall()
+        total = db._get_conn().execute(
+            "SELECT COUNT(*) FROM memories"
+        ).fetchone()[0]
+        memories = []
+        for r in rows:
+            import json as _json
+            try:
+                ents = _json.loads(r[4]) if isinstance(r[4], str) else (r[4] or [])
+            except Exception:
+                ents = []
+            memories.append({
+                "id": r[0],
+                "memory": r[1],
+                "node_type": r[2],
+                "chapter": r[3],
+                "entities": ents,
+                "importance": r[5],
+                "category": r[6],
+                "created_at": r[7],
+            })
+        return {"memories": memories, "total": total}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/memory/{project_id}/{mem_id}")
+def delete_memory(project_id: str, mem_id: int):
+    db = get_db(project_id)
+    if db.delete_memory(mem_id):
+        return {"status": "deleted"}
+    raise HTTPException(status_code=404, detail="Memory not found")
+
+
+@app.get("/api/stats/{project_id}", response_model=StatusResponse)
+def stats(project_id: str):
+    db = get_db(project_id)
+    return StatusResponse(status="ok", memory_count=db.count())
+
+
+# ---------------------------------------------------------------------------
+# 入口
+# ---------------------------------------------------------------------------
+
+def main():
+    parser = argparse.ArgumentParser(description="Kioku Memory Engine")
+    parser.add_argument("--port", type=int, default=49152,
+                        help="Listen port (default: 49152)")
+    parser.add_argument("--data-dir", type=str, default="./storys",
+                        help="Data directory root (default: ./storys)")
+    parser.add_argument("--host", type=str, default="127.0.0.1",
+                        help="Bind address (default: 127.0.0.1)")
+    args = parser.parse_args()
+
+    global data_root
+    data_root = os.path.abspath(args.data_dir)
+    os.makedirs(data_root, exist_ok=True)
+
+    import uvicorn
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+
+
+if __name__ == "__main__":
+    main()
