@@ -1,31 +1,21 @@
 # Show Me The Story — AI Novel Writer (Baize Fork)
 
-> Forked from NousResearch/show-me-the-story. Chinese: [README.md](README.md)
+> Forked from NousResearch/show-me-the-story. This fork differs from the original in the following ways.
 
-Same binary, same web UI, same API. What changed is listed below.
+| # | Original | This Fork |
+|---|----------|-----------|
+| 1 | StorySynopsis injected as per-chapter instruction | Relabeled as "Full outline (reference)" — directional only, per-chapter outline takes precedence. Frontend labels synced |
+| 2 | All prompt fields flat-injected, no priority | Three-tier injection: 🔴core directive > 🟡constraint > 🟢reference |
+| 3 | WritingStyle as a standalone field | Removed (covered by persona) |
+| 4 | Previous 800 chars of last chapter injected into every writing call (PreviousEnding) | Removed from writing prompt (kept in consistency check, 400-char limit) |
+| 5 | Summary word count left to AI's discretion | Code-level 500-char hard truncation |
+| 6 | No chapter-outline search | `.declarations/declarations.json` keyword index. 🔍 search button on writing page + agent tool. On-demand only |
+| 7 | Mem0 uses sentence_transformers | Replaced with fastembed + onnxruntime. RAM ~800MB→~200MB |
+| 8 | craft-category skills auto-inject into Agent chat | Filtered — only polish skills auto-inject |
+| 9 | No story-arc awareness | get_narrative_position tool + current phase info in system prompt |
 
----
+### Contributors
 
-## Changes compared to original SMTS
-
-| # | Area | What | Why |
-|---|------|------|-----|
-| 1 | **Memory engine** | Replaced `sentence_transformers` with `fastembed` + `onnxruntime` | RAM: ~800MB → ~200MB. Local model `BAAI/bge-small-zh-v1.5`, no external API |
-| 2 | **Prompt architecture** | Restructured flat user prompt into three priority layers: 🔴core directive / 🟡constraint / 🟢reference. Separated system prompt (persona) from user prompt. Removed `WritingStyle` (covered by persona) | AI stopped confusing instruction levels |
-| 3 | **Full outline role** | Relabeled from per-chapter instruction to background reference. Frontend labels synced | Won't leak future plot in early chapters |
-| 4 | **Summary system** | Code-level 500-char hard truncation. Removed PreviousEnding from writing prompt (kept in consistency check, 400-char limit) | Consistent summary quality, saves ~400 chars/token per chapter |
-| 5 | **Declaration search** | Standalone JSON keyword index (`project/.declarations/declarations.json`). No vectors, no embedding. 🔍 button on writing page. Agent tool `search_declarations`. Search on demand only — no auto-inject | Find past chapter outlines without paying for vector DB |
-| 6 | **Skill injection** | craft-category skills (`writing`) no longer auto-inject into agent chat. Only `polish` stays auto. | Less prompt noise |
-| 7 | **Narrative position** | `get_narrative_position` agent tool. `formatNarrativePosition` function. Current story-arc position injected into system prompt | Context for what stage the story is at |
-| 8 | **Bug fixes** | `ensureProject` guards. `broadcastProgress` fix. Chapter outline editing allowed on non-writing-state chapters | More stable |
-
-## TODO
-
-- craft revision button (pending declaration search data)
-
----
-
-- **GuaiZi** — design, decisions
-- **Baize** — implementation
+GuaiZi (design/decisions) · Baize (implementation)
 
 > Original: NousResearch/show-me-the-story · Apache 2.0
