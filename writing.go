@@ -304,11 +304,11 @@ func checkOutlineConsistency(ctx context.Context, apiCfg *APIConfig, cfg *Config
 	}
 
 	userPrompt := RenderPrompt(cfg.Prompts.OutlineConsistencyCheck, map[string]string{
-		"ChapterNum":     fmt.Sprintf("%d", ch.Num),
-		"ChapterTitle":   ch.Title,
-		"ChapterOutline": ch.Outline,
-		"HistorySummary": buildHistorySummaryForLang(state, idx, lang),
-		"PreviousEnding": prevEnding,
+			"ChapterNum":     fmt.Sprintf("%d", ch.Num),
+			"ChapterTitle":   ch.Title,
+			"ChapterOutline": ch.Outline,
+			"HistorySummary": buildHistorySummaryForLang(state, idx, lang),
+			"PreviousEnding": prevEnding,
 	})
 	systemPrompt := SystemPromptFor(lang, "outline_editor_brief_json")
 
@@ -513,16 +513,14 @@ func generateChapterContentStream(ctx context.Context, apiCfg *APIConfig, cfg *C
 	targetWords := snapshot.TargetWordsPerChapter
 
 	userPrompt := RenderPrompt(cfg.Prompts.ChapterWriting, map[string]string{
-		"Title":              preferUserValue(cfg.Story.Title, state.Title),
-		"ChapterNum":         fmt.Sprintf("%d", ch.Num),
-		"CorePrompt":         state.CorePrompt,
-		"StorySynopsis":      preferUserValue(cfg.Story.StorySynopsis, state.StorySynopsis),
-		"HistorySummary":     historySummary,
-		"PreviousEnding":     buildPreviousChapterTailForLang(state, idx, lang),
-		"ChapterTitle":       ch.Title,
-		"ChapterOutline":     ch.Outline,
-		"WritingStyle":       cfg.Story.WritingStyle,
-		"WritingPOV":         cfg.Story.WritingPOV,
+			"Title":              preferUserValue(cfg.Story.Title, state.Title),
+			"ChapterNum":         fmt.Sprintf("%d", ch.Num),
+			"CorePrompt":         state.CorePrompt,
+			"StorySynopsis":      preferUserValue(cfg.Story.StorySynopsis, state.StorySynopsis),
+			"HistorySummary":     historySummary,
+			"ChapterTitle":       ch.Title,
+			"ChapterOutline":     ch.Outline,
+			"WritingPOV":         cfg.Story.WritingPOV,
 		"CharacterContext":   characterContext,
 		"WorldviewContext":   worldviewContext,
 		"TargetWords":        fmt.Sprintf("%d", targetWords),
@@ -592,7 +590,16 @@ func generateChapterSummary(ctx context.Context, apiCfg *APIConfig, cfg *Config,
 	})
 
 	systemPrompt := SystemPromptFor(cfg.Language, "summary_analyst")
-	return CallAPI(ctx, apiCfg, systemPrompt, userPrompt)
+	summary, err := CallAPI(ctx, apiCfg, systemPrompt, userPrompt)
+	if err != nil {
+		return summary, err
+	}
+	// 硬限制摘要总字数不超过500汉字
+	runes := []rune(summary)
+	if len(runes) > 500 {
+		summary = string(runes[:500])
+	}
+	return summary, nil
 }
 
 func generateChapterSummaryWithRetryLog(ctx context.Context, apiCfg *APIConfig, cfg *Config, content string, logger *LogBroadcaster) string {
@@ -816,7 +823,7 @@ func buildHistorySummary(state *Progress, idx int) string {
 }
 
 const (
-	prevTailMaxRunes = 800  // 注入上一章尾部原文的最大字数
+	prevTailMaxRunes = 400  // 注入上一章尾部原文的最大字数
 	openingMaxRunes  = 1000 // 衔接优化时提取本章开头片段的最大字数
 )
 

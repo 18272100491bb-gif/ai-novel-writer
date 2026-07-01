@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"path/filepath"
 	"strings"
 )
@@ -236,6 +237,88 @@ func calcSynopsisLengthRange(chapterCount, targetWordsPerChapter int) (minLen, m
 	return minLen, maxLen
 }
 
+// formatNarrativePosition returns a human-readable narrative position string
+// showing overall story progression, arc phase, and chapter status breakdown.
+func formatNarrativePosition(state *Progress, chapterCount int, lang string) string {
+	zh := NormalizeLanguage(lang) == LangZH
+	if chapterCount < 1 {
+		chapterCount = 1
+	}
+
+	accepted := 0
+	writing := 0
+	review := 0
+	pending := 0
+	currentNum := 0
+	for _, ch := range state.Chapters {
+		switch ch.Status {
+		case StatusAccepted:
+			accepted++
+		case StatusWriting:
+			writing++
+		case StatusReview:
+			review++
+		default:
+			pending++
+		}
+		if ch.Num > currentNum {
+			currentNum = ch.Num
+		}
+	}
+
+	if state.CurrentChapterIndex > 0 && state.CurrentChapterIndex <= len(state.Chapters) {
+		currentNum = state.Chapters[state.CurrentChapterIndex].Num
+	}
+
+	totalChapters := len(state.Chapters)
+	if totalChapters < 1 {
+		totalChapters = chapterCount
+	}
+
+	pct := float64(currentNum) / float64(totalChapters) * 100.0
+
+	// Narrative arc phase based on overall progress
+	var phaseZH, phaseEN string
+	switch {
+	case pct <= 15:
+		phaseZH = "开端"
+		phaseEN = "Beginning"
+	case pct <= 50:
+		phaseZH = "发展"
+		phaseEN = "Rising Action / Development"
+	case pct <= 75:
+		phaseZH = "转折·高潮"
+		phaseEN = "Turning Point / Climax"
+	default:
+		phaseZH = "结局"
+		phaseEN = "Resolution"
+	}
+
+	var sb strings.Builder
+	if zh {
+		sb.WriteString(fmt.Sprintf("叙事位置: 已完成 %d/%d 章 (%.0f%%)，处于「%s」阶段\n", accepted+review, totalChapters, pct, phaseZH))
+		if accepted > 0 {
+			sb.WriteString(fmt.Sprintf("  已定稿: %d 章 | 审核中: %d 章 | 待写: %d 章\n", accepted, review, pending))
+		}
+		if state.Phase == "outline" {
+			sb.WriteString("  当前阶段: 大纲\n")
+		} else {
+			sb.WriteString(fmt.Sprintf("  当前指针: 第 %d 章\n", currentNum))
+		}
+	} else {
+		sb.WriteString(fmt.Sprintf("Narrative position: %d/%d chapters (%.0f%%), in \"%s\" phase\n", accepted+review, totalChapters, pct, phaseEN))
+		if accepted > 0 {
+			sb.WriteString(fmt.Sprintf("  Accepted: %d | In review: %d | Pending: %d\n", accepted, review, pending))
+		}
+		if state.Phase == "outline" {
+			sb.WriteString("  Current phase: Outline\n")
+		} else {
+			sb.WriteString(fmt.Sprintf("  Current pointer: Chapter %d\n", currentNum))
+		}
+	}
+	return sb.String()
+}
+
 func buildAgentSystemPromptZH(ctx *AgentContext, toolDesc string) string {
 	var sb strings.Builder
 	sb.WriteString("你是一个小说创作助手，全权负责管理小说项目的一切操作，包括：生成/修订/确认大纲、生成/修订/确认章节、管理角色/世界观/组织/关系/伏笔、技能管理、项目配置等。\n\n")
@@ -252,6 +335,9 @@ func buildAgentSystemPromptZH(ctx *AgentContext, toolDesc string) string {
 	synMin, synMax := calcSynopsisLengthRange(ctx.Config.Story.ChapterCount, ctx.Config.Story.TargetWordsPerChapter)
 	sb.WriteString(fmt.Sprintf("全书计划总字数: 约 %d 字\n", totalWords))
 	sb.WriteString(fmt.Sprintf("故事梗概建议字数: %d–%d 字\n", synMin, synMax))
+	sb.WriteString("\n")
+	sb.WriteString(formatNarrativePosition(ctx.State, ctx.Config.Story.ChapterCount, LangZH))
+	sb.WriteString("\n")
 
 	if ctx.Settings != nil {
 		sb.WriteString(fmt.Sprintf("角色数: %d\n", len(ctx.Settings.Characters)))
@@ -279,7 +365,7 @@ func buildAgentSystemPromptZH(ctx *AgentContext, toolDesc string) string {
 
 	sb.WriteString("\n")
 
-	enabledSkills := GetEnabledSkills(ctx.Skills, ctx.Config.SkillConfig)
+	enabledSkills := GetEnabledSkillsByCategory(ctx.Skills, ctx.Config.SkillConfig, "polish")
 	if len(enabledSkills) > 0 {
 		sb.WriteString("## 已启用技能\n")
 		sb.WriteString(FormatSkillsContent(enabledSkills))
@@ -358,6 +444,9 @@ func buildAgentSystemPromptEN(ctx *AgentContext, toolDesc string) string {
 	synMin, synMax := calcSynopsisLengthRange(ctx.Config.Story.ChapterCount, ctx.Config.Story.TargetWordsPerChapter)
 	sb.WriteString(fmt.Sprintf("Planned total book length: ~%d words\n", totalWords))
 	sb.WriteString(fmt.Sprintf("Recommended synopsis length: %d–%d characters\n", synMin, synMax))
+	sb.WriteString("\n")
+	sb.WriteString(formatNarrativePosition(ctx.State, ctx.Config.Story.ChapterCount, LangEN))
+	sb.WriteString("\n")
 
 	if ctx.Settings != nil {
 		sb.WriteString(fmt.Sprintf("Characters: %d\n", len(ctx.Settings.Characters)))
@@ -385,7 +474,7 @@ func buildAgentSystemPromptEN(ctx *AgentContext, toolDesc string) string {
 
 	sb.WriteString("\n")
 
-	enabledSkills := GetEnabledSkills(ctx.Skills, ctx.Config.SkillConfig)
+	enabledSkills := GetEnabledSkillsByCategory(ctx.Skills, ctx.Config.SkillConfig, "polish")
 	if len(enabledSkills) > 0 {
 		sb.WriteString("## Enabled skills\n")
 		sb.WriteString(FormatSkillsContent(enabledSkills))
@@ -1995,6 +2084,64 @@ func getBuiltinTools() []Tool {
 				*ctx.State = Progress{Phase: "outline"}
 				ctx.Logger.Success("进度已重置。")
 				return agentMsg(ctx, "agent.progress_reset"), nil
+			},
+		},
+		{
+			Name:        "search_memories",
+			Description: `【冷记忆语义搜索】搜索已写章节中发生过的具体事件、角色行为、情节发展等叙事记忆，不是搜索角色设定或大纲。当你需要回顾「之前写过什么」「某个角色做过什么」「某件事发生时的细节」时用这个。底层使用Mem0向量检索，基于语义匹配而非关键词。search_project只能搜设定和标题大纲，搜不到正文里发生过的事。`,
+			Parameters:  `{"query": "搜索关键词，如'主角获得了什么法宝'或'张三和李四之间发生了什么'"}`,
+			Execute: func(args json.RawMessage, ctx *AgentContext) (string, error) {
+				var params struct {
+					Query string `json:"query"`
+				}
+				if err := json.Unmarshal(args, &params); err != nil || params.Query == "" {
+					return "", agentErr(ctx, "agent.search_keyword_required")
+				}
+				result := Mem0Search(ctx.ProgressPath, params.Query, 15, nil, mem0EntityWeights)
+				if ctx.Logger != nil {
+					ctx.Logger.Info(fmt.Sprintf("[search_memories] query=%q path=%q result_len=%d", params.Query, ctx.ProgressPath, len(result)))
+				}
+				if result == "" {
+					return agentMsg(ctx, "agent.search_no_results"), nil
+				}
+				return result, nil
+			},
+		},
+		{
+			Name:        "get_narrative_position",
+			Description: "获取当前故事在主干大纲中的精确位置——已完成章节数、完成百分比、处于故事开端/发展/高潮/结局哪个阶段。回答「写到哪了」「故事进展到什么阶段」这类问题时用这个。",
+			Parameters:  `{}`,
+			Execute: func(args json.RawMessage, ctx *AgentContext) (string, error) {
+				return formatNarrativePosition(ctx.State, ctx.Config.Story.ChapterCount, ctx.Config.Language), nil
+			},
+		},
+		{
+			Name:        "search_declarations",
+			Description: "关键词搜索历史章节大纲记录（声明层）。当你需要回顾用户之前对某章写过的具体大纲指令时使用，比如「我之前关于反派身份是怎么写的」「第三章有没有提到某个设定」。返回格式为 [第N章 标题] 内容。注意：这不是叙事记忆，不是角色设定，不是全文梗概——它只搜用户手动写过的章节大纲。",
+			Parameters:  `{"query": "搜索关键词，如'反派'或'太上神脑'"}`,
+			Execute: func(args json.RawMessage, ctx *AgentContext) (string, error) {
+				var params struct {
+					Query string `json:"query"`
+				}
+				if err := json.Unmarshal(args, &params); err != nil || params.Query == "" {
+					return "", agentErr(ctx, "agent.search_keyword_required")
+				}
+				// Build the API call to search declarations
+				searchURL := fmt.Sprintf("http://127.0.0.1:48090/api/declarations/search")
+				body := fmt.Sprintf(`{"query":"%s"}`, params.Query)
+				resp, err := http.Post(searchURL, "application/json", strings.NewReader(body))
+				if err != nil {
+					return "", agentErr(ctx, "agent.search_failed", err)
+				}
+				defer resp.Body.Close()
+				var results []DeclarationResult
+				if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
+					return "", agentErr(ctx, "agent.search_failed", err)
+				}
+				if len(results) == 0 {
+					return agentMsg(ctx, "agent.search_no_results"), nil
+				}
+				return FormatDeclarations(results), nil
 			},
 		},
 	}

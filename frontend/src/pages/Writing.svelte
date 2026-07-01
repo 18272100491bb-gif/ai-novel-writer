@@ -64,6 +64,30 @@
   );
   $: writingConflict = p?.pending_writing_conflict || null;
 
+  // 历史大纲检索
+  let showDeclSearch = false;
+  let declQuery = '';
+  let declResults = [];
+  let declLoading = false;
+
+  async function searchDeclarations() {
+    if (!declQuery.trim()) return;
+    declLoading = true;
+    try {
+      const res = await api('POST', '/api/declarations/search', { query: declQuery.trim() });
+      declResults = res || [];
+    } catch (e) {
+      addToast('搜索失败: ' + e.message, 'error');
+      declResults = [];
+    }
+    declLoading = false;
+  }
+
+  function insertDeclaration(result) {
+    // TODO: Insert into outline editor when available
+    addToast(`已复制 [第${result.chapter_num}章] 到剪贴板`, 'success');
+  }
+
   async function resolveWritingConflict(action) {
     if ($taskRunning) return;
     try {
@@ -426,8 +450,38 @@
               {#if ch.outline}
                 <details class="bg-base-300 rounded">
                   <summary class="p-2 text-xs text-base-content/50 cursor-pointer select-none">{$t('writing.chapter.outline')}</summary>
-                  <div class="px-2 pb-2 text-sm text-base-content/70">{ch.outline}</div>
+                  <div class="px-2 pb-2 text-sm text-base-content/70 flex items-center justify-between">
+                    <span class="flex-1">{ch.outline}</span>
+                    <button class="btn btn-ghost btn-xs shrink-0 ml-2" title="搜索历史章节大纲" on:click|stopPropagation={() => { showDeclSearch = !showDeclSearch; if (showDeclSearch) declQuery = ''; }}>
+                      <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
+                    </button>
+                  </div>
                 </details>
+              {/if}
+
+              {#if showDeclSearch}
+                <div class="bg-base-300 rounded p-2 space-y-1.5">
+                  <div class="flex gap-1">
+                    <input type="text" class="input input-xs flex-1" bind:value={declQuery} placeholder="搜历史章节大纲关键词..." on:keydown={e => e.key === 'Enter' && searchDeclarations()} />
+                    <button class="btn btn-primary btn-xs" on:click={searchDeclarations} disabled={declLoading || !declQuery.trim()}>
+                      {declLoading ? '搜索中...' : '搜索'}
+                    </button>
+                  </div>
+                  {#if declResults.length > 0}
+                    <div class="max-h-32 overflow-y-auto space-y-1">
+                      {#each declResults as r}
+                        <div class="bg-base-100 rounded p-1.5 text-xs cursor-pointer hover:bg-primary/10 flex items-start gap-1" on:click={() => {}}>
+                          <span class="shrink-0 text-primary">[第{r.chapter_num}章]</span>
+                          <span>{r.content.slice(0, 100)}{r.content.length > 100 ? '…' : ''}</span>
+                        </div>
+                      {/each}
+                    </div>
+                  {:else if declLoading}
+                    <div class="text-xs text-base-content/40 text-center py-2">搜索中…</div>
+                  {:else if declQuery && !declLoading}
+                    <div class="text-xs text-base-content/40 text-center py-2">无结果</div>
+                  {/if}
+                </div>
               {/if}
 
               {#if ch.summary}

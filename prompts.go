@@ -48,23 +48,36 @@ var DefaultPromptsZH = PromptsConfig{
 
 	ChapterWriting: `请为小说《{{.Title}}》创作第 {{.ChapterNum}} 章的正文。
 
-【核心写作提示词】
-{{.CorePrompt}}
-
-【故事梗概】
-{{.StorySynopsis}}
-
-【前情提要（滚动最近章节进展，请严格承接状态）】
-{{.HistorySummary}}
-
-{{.PreviousEnding}}{{.Foreshadows}}{{.Memory}}{{.OutlineConstraints}}【本章创作任务】
+【核心指令】本章大纲（必须严格遵守）
 章节标题：《{{.ChapterTitle}}》
 核心大纲：{{.ChapterOutline}}
 
-【写作风格】{{.WritingStyle}}
-【叙述视角】{{.WritingPOV}}
+【核心指令】叙述视角——全书视角必须统一，按此写作
+{{.WritingPOV}}
+
+【核心指令】字数控制——正文字数须严格控制在 {{.TargetWordsMin}}–{{.TargetWordsMax}} 字（目标 {{.TargetWords}} 字）
+超出上限不可接受；只写本章大纲范围内的情节，宁可精简描写也不要写入后续章节的内容
+
+【约束】前情提要（不可与已发生剧情矛盾）
+{{.HistorySummary}}
+
+【约束】伏笔状态（已安排的伏笔必须推进或回收，不可遗忘）
+{{.Foreshadows}}
+
+【约束】项目创作指导
+{{.CorePrompt}}
+
+【参考】完整大纲（背景参考，把握整体方向，具体以本章大纲为准）
+{{.StorySynopsis}}
+
+{{.Memory}}
+
+{{.OutlineConstraints}}
+
 {{.CharacterContext}}
+
 {{.WorldviewContext}}
+
 创作要求：
 1. 严格承接前情提要中的人物状态、时间线和已发生事件，不得与之矛盾
 2. 只写本章大纲范围内的情节，不要提前透支后续章节的内容
@@ -74,9 +87,8 @@ var DefaultPromptsZH = PromptsConfig{
 6. 人物对话要符合各自的性格设定，避免所有角色说话腔调雷同
 7. 多用具体的动作、感官细节和对话推进情节，少用抽象的总结性叙述
 8. 章节结尾留出自然的悬念或情绪钩子，但不要写"欲知后事如何"之类的套话
-9. 全书叙述视角必须严格统一：按【叙述视角】要求写作，不得擅自切换人称或视角主体（若设定为交替视角，须按既定规则切换）
-10. 正文字数须严格控制在 {{.TargetWordsMin}}–{{.TargetWordsMax}} 字（目标 {{.TargetWords}} 字）。超出上限不可接受；只写本章大纲范围内的情节，宁可精简描写也不要写入后续章节的内容
-11. 只输出小说正文：禁止出现章节标题、章节号、大纲复述、作者说明、分隔线，以及「第X章」「（第X章正文）」「本章完」「待续」「以下为修订后的第X章完整正文」「以下是第X章」等任何元信息或说明性文字。正文前不要有任何引导语，正文后不要有任何总结语`,
+9. 全书叙述视角必须严格统一：按【核心指令·叙述视角】要求写作，不得擅自切换人称或视角主体（若设定为交替视角，须按既定规则切换）
+10. 只输出小说正文：禁止出现章节标题、章节号、大纲复述、作者说明、分隔线，以及「第X章」「（第X章正文）」「本章完」「待续」「以下为修订后的第X章完整正文」「以下是第X章」等任何元信息或说明性文字。正文前不要有任何引导语，正文后不要有任何总结语`,
 
 	ChapterRevision: `你是这部小说的作者，现在需要根据修改意见修订第 {{.ChapterNum}} 章《{{.ChapterTitle}}》。
 
@@ -117,7 +129,9 @@ var DefaultPromptsZH = PromptsConfig{
 【情绪色调】用2-3个词概括本章的整体情绪氛围。
 
 【章节正文】
-{{.ChapterContent}}`,
+{{.ChapterContent}}
+
+重要：总字数（包含所有标签字段）不得超过500字。严格压缩每个字段，不要冗余描写。`,
 
 	FactCheck: `你是一位严谨的小说事实核查员。你的任务是检查小说章节中的客观事实矛盾。
 
@@ -372,10 +386,12 @@ var DefaultPromptsZH = PromptsConfig{
 
 	OutlineConsistencyCheck: `你是一位严谨的小说策划编辑。在创作本章正文之前，请检查本章大纲是否已与实际写出的前文剧情冲突。
 
-【前情提要（已发生剧情，不可更改）】
+【约束】前情提要（已发生剧情，不可更改）
 {{.HistorySummary}}
 
-{{.PreviousEnding}}【待检查的本章大纲】
+【参考】上一章结尾原文（检查承接连续性用）
+{{.PreviousEnding}}
+【待检查的本章大纲】
 第{{.ChapterNum}}章《{{.ChapterTitle}}》：{{.ChapterOutline}}
 
 检查要点（仅限以下客观冲突）：

@@ -91,9 +91,8 @@ def get_embedder():
         if _EMBEDDER is not None:
             return _EMBEDDER
         try:
-            from sentence_transformers import SentenceTransformer
-            _EMBEDDER = SentenceTransformer("BAAI/bge-small-zh-v1.5")
-            _EMBEDDER.max_seq_length = 512
+            from fastembed import TextEmbedding
+            _EMBEDDER = TextEmbedding(model_name="BAAI/bge-small-zh-v1.5")
         except Exception as e:
             print(f"[mem0] WARNING: Failed to load BGE Small: {e}", flush=True)
             _EMBEDDER = None
@@ -106,7 +105,7 @@ def embed_text(text: str):
     if model is None:
         return []
     try:
-        vec = model.encode(text, normalize_embeddings=True)
+        vec = list(model.embed(text))[0]
         return vec.tolist()
     except Exception:
         return []

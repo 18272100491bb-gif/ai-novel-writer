@@ -36,6 +36,9 @@ type Handlers struct {
 	postprocess     *PostProcessState
 	postprocessPath string
 
+	// 章节大纲声名检索
+	declarations *DeclarationDB
+
 	// Task management
 	taskMu      sync.Mutex
 	taskRunning bool
@@ -135,6 +138,15 @@ func (h *Handlers) switchProject(name string) error {
 	h.sessionsDir = sessionsDir
 	h.postprocessPath = postprocessPath
 	h.postprocess = postprocess
+
+	// 初始化声名检索（章节大纲关键词搜索）
+	if decl, err := OpenDeclarationDB(projectDir); err == nil {
+		_ = decl.SyncAllFromState(state)
+		h.declarations = decl
+	} else {
+		fmt.Printf(" [系统] 警告: 无法初始化声名检索: %v\n", err)
+		h.declarations = nil
+	}
 
 	// 持久化项目选择，重启后自动恢复
 	lastFile := filepath.Join(h.progDir, "last_project.txt")
@@ -1149,10 +1161,38 @@ func (h *Handlers) PutChapterOutline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 同步到声名索引
+	if h.declarations != nil {
+		_ = h.declarations.SyncChapter(num, body.Title, body.Outline)
+	}
+
 	go RunForeshadowOutlineCheckAndSave(context.Background(), h.apiCfg, h.cfg, h.state, h.progressPath, h.logger)
 
 	h.logger.SuccessKey("log.chapter_outline_updated", num)
 	h.writeJSON(w, http.StatusOK, h.state)
+}
+
+// PostDeclarationsSearch 关键词搜索历史章节大纲
+func (h *Handlers) PostDeclarationsSearch(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureProject(w, r) {
+		return
+	}
+
+	var body struct {
+		Query string `json:"query"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+
+	if h.declarations == nil {
+		h.writeJSON(w, http.StatusOK, []DeclarationResult{})
+		return
+	}
+
+	results := h.declarations.Search(body.Query)
+	h.writeJSON(w, http.StatusOK, results)
 }
 
 // PostOutlineManual 手动创建大纲（不依赖AI生成）

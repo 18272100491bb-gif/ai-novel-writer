@@ -94,8 +94,9 @@ type Progress struct {
 	LastOutlineCharacterReport  *OutlineCharacterReport  `json:"last_outline_character_report,omitempty"`
 	PendingWritingConflict      *WritingConflict         `json:"pending_writing_conflict,omitempty"`
 	MemoryEntries               []MemoryEntry            `json:"memory_entries,omitempty"`
-	MemoryMaxTokens             int        `json:"memory_max_tokens,omitempty"`
-	ProjectDir                  string     `json:"-"`
+	MemoryMaxTokens             int             `json:"memory_max_tokens,omitempty"`
+	OutlineNodes                []OutlineNode   `json:"outline_nodes,omitempty"`
+	ProjectDir                  string          `json:"-"`
 }
 
 const (

@@ -1,37 +1,31 @@
-# Go
-show-me-the-story
+
+*~
+api-config-env.yaml
+api-config.yaml
+# Config
+*.cov
+data/
+# Data (user stories/projects)
+.DS_Store
+# Editor
+.env
 *.exe
 *.exe~
+# Frontend
+frontend/dist/
+frontend/node_modules/
+frontend/.svelte-kit/
+# Go
+.idea/
+mem0/__pycache__/
+# OS
 *.out
+*.prof
+show-me-the-story
+storys/
+*.swo
+*.swp
 *.test
 *.test.exe
-*.prof
-*.cov
-*.test
-
-# Frontend
-frontend/node_modules/
-frontend/dist/
-frontend/.svelte-kit/
-
-# Data (user stories/projects)
-storys/
-data/
-
-# Config
-.env
-api-config.yaml
-api-config-env.yaml
-
-# Editor
-.idea/
+Thumbs.db
 .vscode/
-*.swp
-*.swo
-*~
-.DS_Store
-Thumbs.db
-
-# OS
-.DS_Store
-Thumbs.db

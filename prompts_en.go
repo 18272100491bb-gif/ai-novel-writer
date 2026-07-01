@@ -38,23 +38,36 @@ Rules:
 
 	ChapterWriting: `Write the prose for chapter {{.ChapterNum}} of the novel "{{.Title}}".
 
-[Core writing prompt]
-{{.CorePrompt}}
-
-[Synopsis]
-{{.StorySynopsis}}
-
-[Story-so-far (rolling recap of recent chapters — continue from this state strictly)]
-{{.HistorySummary}}
-
-{{.PreviousEnding}}{{.Foreshadows}}{{.Memory}}{{.OutlineConstraints}}[Task for this chapter]
+[Core directive] Chapter outline (must be followed strictly)
 Chapter title: "{{.ChapterTitle}}"
 Outline: {{.ChapterOutline}}
 
-[Writing style] {{.WritingStyle}}
-[Narrative POV] {{.WritingPOV}}
+[Core directive] Narrative POV — keep consistent throughout
+{{.WritingPOV}}
+
+[Core directive] Word count — must stay within {{.TargetWordsMin}}–{{.TargetWordsMax}} words (target {{.TargetWords}})
+Exceeding limits is unacceptable; cover only this chapter's outline — compress rather than advance into later chapters.
+
+[Constraint] Story-so-far (do not contradict established facts)
+{{.HistorySummary}}
+
+[Constraint] Active foreshadowing (must advance or resolve, never forget)
+{{.Foreshadows}}
+
+[Constraint] Project writing guidance
+{{.CorePrompt}}
+
+[Reference] Full outline (background context — the chapter outline above takes precedence)
+{{.StorySynopsis}}
+
+{{.Memory}}
+
+{{.OutlineConstraints}}
+
 {{.CharacterContext}}
+
 {{.WorldviewContext}}
+
 Writing rules:
 1. Strictly continue from the character states, timeline, and established facts in the story-so-far. Do not contradict them.
 2. Stay inside this chapter's outline. Do not borrow material from later chapters.
@@ -64,9 +77,8 @@ Writing rules:
 6. Each character's dialogue must match their established voice; do not let everyone sound alike.
 7. Drive the plot with concrete action, sensory detail, and dialogue. Avoid abstract, summarising narration.
 8. Close on a natural cliffhanger or emotional hook. Do not write meta lines like "to be continued".
-9. Keep the narrative POV strictly consistent: follow [Narrative POV] throughout; do not switch person or viewpoint subject unless the POV spec explicitly allows alternation.
-10. Chapter length must stay within {{.TargetWordsMin}}–{{.TargetWordsMax}} words (target {{.TargetWords}}). Exceeding the upper limit is unacceptable. Cover only this chapter's outline — compress description rather than advancing into later chapters.
-11. Output ONLY the chapter prose — no chapter title, chapter number, outline recap, author notes, dividers, or meta lines such as "Chapter X", "(Chapter X text)", "End of chapter", "To be continued", "Here is the revised chapter", "Below is the full text". Do not add any preamble before the prose or any summary after it.`,
+9. Keep the narrative POV strictly consistent: follow [Core directive · Narrative POV] throughout; do not switch person or viewpoint subject unless the POV spec explicitly allows alternation.
+10. Output ONLY the chapter prose — no chapter title, chapter number, outline recap, author notes, dividers, or meta lines such as "Chapter X", "(Chapter X text)", "End of chapter", "To be continued", "Here is the revised chapter", "Below is the full text". Do not add any preamble before the prose or any summary after it.`,
 
 	ChapterRevision: `You are the author of this novel. Revise chapter {{.ChapterNum}} "{{.ChapterTitle}}" according to the feedback below.
 
@@ -107,7 +119,9 @@ Use exactly this format:
 [Emotional palette] Two or three words capturing the chapter's mood.
 
 [Chapter text]
-{{.ChapterContent}}`,
+{{.ChapterContent}}
+
+Important: Total length (including all labels) must not exceed 500 characters. Compress each field; avoid redundant description.`,
 
 	FactCheck: `You are a strict novel fact-checker. Your task is to detect objective factual contradictions in the chapter.
 
@@ -362,10 +376,12 @@ Rules (strict):
 
 	OutlineConsistencyCheck: `You are a strict novel-planning editor. Before drafting this chapter's prose, check whether this chapter's outline already conflicts with the actual prior storyline.
 
-[Story-so-far (already happened, cannot be changed)]
+[Constraint] Story-so-far (already happened, cannot be changed)
 {{.HistorySummary}}
 
-{{.PreviousEnding}}[Outline under check]
+[Reference] Previous chapter ending (for checking scene continuity)
+{{.PreviousEnding}}
+[Outline under check]
 Chapter {{.ChapterNum}} "{{.ChapterTitle}}": {{.ChapterOutline}}
 
 Checklist (objective conflicts only):
