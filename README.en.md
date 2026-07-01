@@ -1,6 +1,6 @@
 # Show Me The Story — AI Novel Writer (Baize Fork)
 
-> Forked from NousResearch/show-me-the-story. This fork differs from the original in the following ways.
+> Original by xianii · MIT. This fork differs from the original in the following ways.
 
 | # | Original | This Fork |
 |---|----------|-----------|
@@ -14,8 +14,4 @@
 | 8 | craft-category skills auto-inject into Agent chat | Filtered — only polish skills auto-inject |
 | 9 | No story-arc awareness | get_narrative_position tool + current phase info in system prompt |
 
-### Contributors
-
 GuaiZi (design/decisions) · Baize (implementation)
-
-> Original: NousResearch/show-me-the-story · Apache 2.0

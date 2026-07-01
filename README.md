@@ -1,6 +1,8 @@
 # Show Me The Story — AI 小说生成器 (白泽改造版)
 
-> 分支自 NousResearch/show-me-the-story 并进行改造，以下是原版与本版的差异。
+> 原版作者：xianii · MIT
+
+以下是一个原版与本版的差异对表。
 
 | # | 原版 | 本版 |
 |---|------|------|
@@ -14,8 +16,4 @@
 | 8 | craft 类 skill 自动注入 Agent chat | 过滤，仅 polish 类自动注入 |
 | 9 | 无故事弧位置感知 | get_narrative_position agent 工具 + 系统 prompt 注入当前阶段信息 |
 
-### 贡献者
-
 拐子（方案/决策）· 白泽（实现）
-
-> 原始项目 NousResearch/show-me-the-story · Apache 2.0
