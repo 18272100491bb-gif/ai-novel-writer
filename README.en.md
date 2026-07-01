@@ -1,6 +1,6 @@
 # Show Me The Story — AI Novel Writer (Baize Fork)
 
-> Original by xianii · MIT. This fork differs from the original in the following ways.
+> Original by nigh · MIT. This fork differs from the original in the following ways.
 
 | # | Original | This Fork |
 |---|----------|-----------|

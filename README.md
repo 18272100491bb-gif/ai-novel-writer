@@ -1,6 +1,6 @@
 # Show Me The Story — AI 小说生成器 (白泽改造版)
 
-> 原版作者：xianii · MIT
+> 原版作者：nigh · MIT
 
 以下是一个原版与本版的差异对表。
 
