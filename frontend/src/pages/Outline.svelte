@@ -232,6 +232,13 @@
     outlineCharacterSuggestions.set([]);
     outlineCharacterShowSuggestions.set(false);
   }
+
+  async function parseOutline() {
+    try {
+      await api('POST', '/api/outline/parse');
+      addToast('正在从大纲提取设定...', 'info');
+    } catch (e) { addToast(e.message, 'error'); }
+  }
 </script>
 
 <div class="space-y-3">
@@ -275,8 +282,8 @@
               <input type="text" class="input input-sm w-full" bind:value={manualTitle} placeholder="例：破夜行" />
             </div>
             <div>
-              <span class="text-xs text-base-content/50 mb-0.5 block">故事简介</span>
-              <textarea class="textarea textarea-sm w-full h-20 text-sm" bind:value={manualSynopsis} placeholder="简单介绍一下这个故事"></textarea>
+              <span class="text-xs text-base-content/50 mb-0.5 block">完整大纲（上传或用文件加载）</span>
+              <textarea class="textarea textarea-sm w-full h-40 text-sm" bind:value={manualSynopsis} placeholder="粘贴你的完整大纲，或者通过下方「上传文件」按钮加载"></textarea>
             </div>
             <div>
               <span class="text-xs text-base-content/50 mb-0.5 block">创作指导（可选）</span>
@@ -392,6 +399,9 @@
           <button class="btn btn-ghost btn-xs" on:click={startEditStory} disabled={editingStory}>编辑信息</button>
           {#if inOutlinePhase}
             <button class="btn btn-success btn-xs" on:click={confirmOutline} disabled={$taskRunning || chapters.length === 0}>{$t('outline.btn.confirm')}</button>
+          {/if}
+          {#if displaySynopsis}
+            <button class="btn btn-ghost btn-xs" on:click={parseOutline} disabled={$taskRunning}>解析到接口</button>
           {/if}
           <button class="btn btn-ghost btn-xs" on:click={() => showRevise = !showRevise} disabled={$taskRunning}>{$t('outline.btn.revise')}</button>
           {#if hasAccepted}

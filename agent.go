@@ -1490,18 +1490,16 @@ func getBuiltinTools() []Tool {
 		},
 		{
 			Name:        "confirm_chapter",
-			Description: "确认当前章节",
+			Description: "确认当前章节（异步：生成摘要、更新伏笔、追加记忆然后标记确认）",
 			Parameters:  `{}`,
 			Execute: func(args json.RawMessage, ctx *AgentContext) (string, error) {
 				if ctx.State.Phase != "writing" {
 					return "", agentErr(ctx, "phase_not_writing")
 				}
-				if err := ConfirmChapterAction(ctx.State, ctx.ProgressPath); err != nil {
-					return "", err
-				}
-				ch := ctx.State.Chapters[ctx.State.CurrentChapterIndex-1]
-				ctx.Logger.SuccessKey("log.chapter_confirmed", ch.Num)
-				return agentMsg(ctx, "agent.chapter_confirmed", ch.Num, ch.Title), nil
+				ctx.StartAsync("chapter_confirm", func(goCtx context.Context) error {
+					return ConfirmChapterActionAsync(goCtx, ctx.APICfg, ctx.Config, ctx.State, ctx.ProgressPath, ctx.Settings, ctx.Logger)
+				})
+				return agentMsg(ctx, "agent.chapter_confirm_started"), nil
 			},
 		},
 		{
@@ -2097,7 +2095,7 @@ func getBuiltinTools() []Tool {
 				if err := json.Unmarshal(args, &params); err != nil || params.Query == "" {
 					return "", agentErr(ctx, "agent.search_keyword_required")
 				}
-				result := Mem0Search(ctx.ProgressPath, params.Query, 15, nil, mem0EntityWeights)
+				result := Mem0Search(ctx.ProgressPath, params.Query, 15, nil, mem0EntityWeights, 0)
 				if ctx.Logger != nil {
 					ctx.Logger.Info(fmt.Sprintf("[search_memories] query=%q path=%q result_len=%d", params.Query, ctx.ProgressPath, len(result)))
 				}

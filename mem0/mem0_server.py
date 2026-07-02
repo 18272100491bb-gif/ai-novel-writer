@@ -73,6 +73,7 @@ class SearchRequest(BaseModel):
     top_k: int = 10
     exclude_chapters: list[int] = []
     weights: Optional[dict[str, float]] = None
+    current_chapter: int = 0
 
 
 class SearchResult(BaseModel):
@@ -131,6 +132,7 @@ def search_memory(req: SearchRequest):
             top_k=req.top_k,
             exclude_chapters=req.exclude_chapters,
             entity_weights=req.weights,
+            current_chapter=req.current_chapter,
         )
         return SearchResponse(
             results=[SearchResult(**r) for r in results]

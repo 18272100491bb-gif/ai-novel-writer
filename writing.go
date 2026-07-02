@@ -156,102 +156,42 @@ func GenerateChapterAction(ctx context.Context, apiCfg *APIConfig, cfg *Config, 
 		RunForeshadowOutlineCheckAndSave(ctx, apiCfg, cfg, state, progressPath, logger)
 	}
 
-	maxFactCheckRetries := 3
-	extraConstraints := ""
-	var accumulatedIssues []string
-
-	for attempt := 0; attempt <= maxFactCheckRetries; attempt++ {
-		if ctx.Err() != nil {
-			return fmt.Errorf("任务已取消")
-		}
-		logger.StepInfo(2, 6, "正在构思并撰写正文...")
-		content, err := generateChapterContentWithLengthControl(ctx, apiCfg, cfg, state, i, settings, extraConstraints, logger)
-		if err != nil {
-			return err
-		}
-		if content == "" {
-			return fmt.Errorf("正文生成失败或被取消")
-		}
-		ch.Content = content
-		logger.InfoKey("log.prose_done", countProseUnits(content))
-
-		logger.StepInfo(3, 6, "正在提炼本章摘要...")
-		summary := generateChapterSummaryWithRetryLog(ctx, apiCfg, cfg, content, logger)
-		if summary == "" {
-			return fmt.Errorf("摘要提炼失败或被取消")
-		}
-		ch.Summary = summary
-		logger.InfoKey("log.summary_done")
-
-		logger.StepInfo(4, 6, "正在对本章进行事实核查...")
-		historySummary := buildHistorySummary(state, i)
-		factCheckResult := generateChapterFactCheckWithRetryLog(ctx, apiCfg, cfg, state, i, content, historySummary, logger)
-
-		failed, issues := parseFactCheckResult(factCheckResult)
-		if failed {
-			accumulatedIssues = mergeUniqueIssues(accumulatedIssues, splitFactCheckIssues(issues))
-			if attempt < maxFactCheckRetries {
-				logger.WarnKey("log.factcheck_retry", ch.Num, attempt+1)
-				logger.WarnKey("log.factcheck_details", issues)
-				continue
-			}
-
-			logger.WarnKey("log.factcheck_max_retries")
-			analysis, err := analyzeWritingConflict(ctx, apiCfg, cfg, state, i, content, accumulatedIssues, logger)
-			if err != nil {
-				logger.WarnKey("log.conflict_analyze_failed", err)
-				break
-			}
-
-			if analysis.Reconcilable && strings.TrimSpace(analysis.ExtraConstraints) != "" {
-				logger.InfoKey("log.conflict_retry")
-				extraConstraints = strings.TrimSpace(analysis.ExtraConstraints)
-				content, err = generateChapterContentWithLengthControl(ctx, apiCfg, cfg, state, i, settings, extraConstraints, logger)
-				if err != nil {
-					return err
-				}
-				if content == "" {
-					return fmt.Errorf("正文生成失败或被取消")
-				}
-				ch.Content = content
-				summary = generateChapterSummaryWithRetryLog(ctx, apiCfg, cfg, content, logger)
-				if summary == "" {
-					return fmt.Errorf("摘要提炼失败或被取消")
-				}
-				ch.Summary = summary
-				factCheckResult = generateChapterFactCheckWithRetryLog(ctx, apiCfg, cfg, state, i, content, historySummary, logger)
-				failed, issues = parseFactCheckResult(factCheckResult)
-				if failed {
-					accumulatedIssues = mergeUniqueIssues(accumulatedIssues, splitFactCheckIssues(issues))
-				} else {
-					logger.InfoKey("log.factcheck_constraint_pass")
-					break
-				}
-			}
-
-			conflict := buildWritingConflict(state, i, accumulatedIssues, analysis)
-			lang := cfg.Language
-			conflict.SuggestedActions = ensureConflictActions(conflict.SuggestedActions, lang)
-			state.PendingWritingConflict = conflict
-			if err := SaveProgress(progressPath, state); err != nil {
-				return err
-			}
-			logger.WritingConflict(conflict)
-			return &WritingConflictError{Conflict: conflict}
-		}
-		logger.InfoKey("log.factcheck_pass")
-		break
+	// Generate content once
+	logger.StepInfo(2, 4, "正在构思并撰写正文...")
+	content, err := generateChapterContentWithLengthControl(ctx, apiCfg, cfg, state, i, settings, "", logger)
+	if err != nil {
+		return err
 	}
-
-	state.PendingWritingConflict = nil
-
-	if len(state.Foreshadows) > 0 {
-		logger.StepInfo(5, 6, "正在更新伏笔状态...")
-		syncForeshadowsAfterChapter(ctx, apiCfg, cfg, state, i, progressPath, logger)
+	if content == "" {
+		return fmt.Errorf("正文生成失败或被取消")
 	}
+	ch.Content = content
+	logger.InfoKey("log.prose_done", countProseUnits(content))
 
-	logger.StepInfo(6, 6, "正在维护叙事记忆...")
-	syncMemoryAfterChapter(ctx, apiCfg, cfg, state, i, progressPath, logger)
+	// Full acceptance check: fact + gate7 + gate8 in one API call
+	logger.StepInfo(3, 4, "正在验收章节（事实核查+情绪冗余+修辞自觉）...")
+	historySummary := buildHistorySummary(state, i)
+	acceptanceResult := generateChapterFactCheckWithRetryLog(ctx, apiCfg, cfg, state, i, content, historySummary, logger)
+
+	gateReports, overallFailed := parseAcceptanceResult(acceptanceResult)
+	ch.GateReports = gateReports
+
+	if overallFailed {
+		var allIssues []string
+		for _, g := range gateReports {
+			allIssues = append(allIssues, g.Issues...)
+		}
+		if len(allIssues) > 0 {
+			logger.InfoKey("log.acceptance_issues", allIssues)
+			feedback := "以下是对本章的验收问题，请一次性修正：\n" + strings.Join(allIssues, "\n")
+			revisedContent, reviseErr := reviseChapterContentStream(ctx, apiCfg, cfg, state, i, feedback, settings, logger)
+			if reviseErr == nil && revisedContent != "" {
+				ch.Content = revisedContent
+				logger.InfoKey("log.prose_revised", countProseUnits(revisedContent))
+				// Keep original gate reports — don't re-verify after revision
+			}
+		}
+	}
 
 	SaveChapterMarkdown(filepath.Dir(progressPath), *ch, state.Title)
 
@@ -265,21 +205,37 @@ func GenerateChapterAction(ctx context.Context, apiCfg *APIConfig, cfg *Config, 
 	return nil
 }
 
-// parseFactCheckResult 解析事实核查结果。
-// 优先解析 JSON 中的 result 字段，解析失败时退化为字符串匹配。
-func parseFactCheckResult(raw string) (failed bool, issues string) {
+// parseAcceptanceResult 解析验收结果（事实核查+Gate7+Gate8）。
+// 返回各维度的报告和整体是否FAIL。
+func parseAcceptanceResult(raw string) ([]GateReport, bool) {
 	cleaned := cleanJSONResponse(raw)
 	var resp struct {
-		Result string   `json:"result"`
-		Issues []string `json:"issues"`
+		Result string       `json:"result"`
+		Issues []string     `json:"issues"`
+		Gates  []GateReport `json:"gates"`
 	}
 	if jsonStr := extractJSON(cleaned); jsonStr != "" {
-		if err := json.Unmarshal([]byte(jsonStr), &resp); err == nil && resp.Result != "" {
-			return strings.EqualFold(strings.TrimSpace(resp.Result), "FAIL"), strings.Join(resp.Issues, "；")
+		if err := json.Unmarshal([]byte(jsonStr), &resp); err == nil {
+			if resp.Gates != nil {
+				overallFailed := false
+				for _, g := range resp.Gates {
+					if !g.Passed {
+						overallFailed = true
+					}
+				}
+				return resp.Gates, overallFailed
+			}
+			// Fallback to flat result+issues format
+			return []GateReport{
+				{Gate: "fact_check", Passed: !strings.EqualFold(strings.TrimSpace(resp.Result), "FAIL"), Issues: resp.Issues},
+			}, strings.EqualFold(strings.TrimSpace(resp.Result), "FAIL")
 		}
 	}
-	// fallback：无法解析 JSON 时按字符串匹配
-	return strings.Contains(raw, "FAIL"), truncate(raw, 300)
+	// Last-resort fallback: string matching
+	failed := strings.Contains(raw, "FAIL")
+	return []GateReport{
+		{Gate: "fact_check", Passed: !failed, Issues: []string{truncate(raw, 300)}},
+	}, failed
 }
 
 // checkOutlineConsistency 写前大纲一致性检查：对照前情提要与上一章结尾，
@@ -491,6 +447,46 @@ func ConfirmChapterAction(state *Progress, progressPath string) error {
 	return SaveProgress(progressPath, state)
 }
 
+// ConfirmChapterActionAsync 异步确认章节：生成摘要、更新伏笔、追加记忆后标记确认。
+func ConfirmChapterActionAsync(ctx context.Context, apiCfg *APIConfig, cfg *Config, state *Progress, progressPath string, settings *ProjectSettings, logger *LogBroadcaster) error {
+	if state.Phase != "writing" {
+		return fmt.Errorf("当前不在写作阶段")
+	}
+
+	i := state.CurrentChapterIndex
+	if i >= len(state.Chapters) {
+		return fmt.Errorf("章节索引越界")
+	}
+
+	ch := &state.Chapters[i]
+	if ch.Status != StatusReview {
+		return fmt.Errorf("当前章节不在审核状态，无法确认")
+	}
+
+	if ch.Content != "" {
+		logger.StepInfo(1, 3, "正在提炼本章摘要...")
+		summary := generateChapterSummaryWithRetryLog(ctx, apiCfg, cfg, ch.Content, logger)
+		if summary != "" {
+			ch.Summary = summary
+			logger.InfoKey("log.summary_done")
+		}
+	}
+
+	if len(state.Foreshadows) > 0 {
+		logger.StepInfo(2, 3, "正在更新伏笔状态...")
+		syncForeshadowsAfterChapter(ctx, apiCfg, cfg, state, i, progressPath, logger)
+	}
+
+	logger.StepInfo(3, 3, "正在维护叙事记忆...")
+	syncMemoryAfterChapter(ctx, apiCfg, cfg, state, i, progressPath, logger)
+
+	SaveChapterMarkdown(filepath.Dir(progressPath), *ch, state.Title)
+
+	ch.Status = StatusAccepted
+	state.CurrentChapterIndex = i + 1
+	return SaveProgress(progressPath, state)
+}
+
 func generateChapterContentStream(ctx context.Context, apiCfg *APIConfig, cfg *Config, state *Progress, idx int, settings *ProjectSettings, extraWritingConstraints string, logger *LogBroadcaster) (string, error) {
 	ch := state.Chapters[idx]
 	lang := cfg.Language
@@ -512,11 +508,17 @@ func generateChapterContentStream(ctx context.Context, apiCfg *APIConfig, cfg *C
 	minLen, maxLen := calcChapterLengthRange(snapshot.TargetWordsPerChapter)
 	targetWords := snapshot.TargetWordsPerChapter
 
+	// 接口有数据时不注入完整大纲（已解析到角色/世界观/组织/伏笔中）
+	synopsis := ""
+	if !hasStructuredData(state, settings) {
+		synopsis = preferUserValue(cfg.Story.StorySynopsis, state.StorySynopsis)
+	}
+
 	userPrompt := RenderPrompt(cfg.Prompts.ChapterWriting, map[string]string{
 			"Title":              preferUserValue(cfg.Story.Title, state.Title),
 			"ChapterNum":         fmt.Sprintf("%d", ch.Num),
 			"CorePrompt":         state.CorePrompt,
-			"StorySynopsis":      preferUserValue(cfg.Story.StorySynopsis, state.StorySynopsis),
+			"StorySynopsis":      synopsis,
 			"HistorySummary":     historySummary,
 			"ChapterTitle":       ch.Title,
 			"ChapterOutline":     ch.Outline,

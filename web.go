@@ -105,6 +105,7 @@ func startWebServer(apiCfg *APIConfig, apiCfgPath string, cfg *Config, state *Pr
 	mux.HandleFunc("POST /api/declarations/search", h.PostDeclarationsSearch)
 	mux.HandleFunc("POST /api/outline/manual", h.PostOutlineManual)
 	mux.HandleFunc("POST /api/outline/chapters", h.PostOutlineChapters)
+	mux.HandleFunc("POST /api/outline/parse", h.PostOutlineParse)
 
 	mux.HandleFunc("POST /api/chapter/generate", h.PostChapterGenerate)
 	mux.HandleFunc("GET /api/chapter/conflict", h.GetChapterConflict)

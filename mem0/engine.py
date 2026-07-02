@@ -319,8 +319,11 @@ class MemoryDB:
 
     def search(self, query: str, top_k: int = 10,
                exclude_chapters: list[int] = None,
-               entity_weights: dict[str, float] = None) -> list[dict]:
-        """混合搜索：BM25 + 语义 + importance + 章节感知加权"""
+               entity_weights: dict[str, float] = None,
+               current_chapter: int = 0) -> list[dict]:
+        """
+混合搜索：BM25 + 语义 + importance + 章节感知加权
+        :param current_chapter: 当前写作的章号，用于临近加权。0=不启用。"""
         exclude_chapters = exclude_chapters or []
         entity_weights = entity_weights or {}
 
@@ -353,8 +356,8 @@ class MemoryDB:
                     "entity_bonus": 0.0,
                 }
 
-        # 章节感知加权（临近章节加分）
-        max_chapter = max(
+        # 章节感知加权（离当前写作章越近权重越高）
+        current = current_chapter if current_chapter > 0 else max(
             (s["item"]["chapter"] for s in combined.values() if s["item"]["chapter"]),
             default=0
         )
@@ -362,9 +365,9 @@ class MemoryDB:
         results = []
         for mem_id, s in combined.items():
             item = s["item"]
-            # 章节权重：越近越高
-            ch_dist = max_chapter - item["chapter"] if max_chapter > 0 else 0
-            chapter_weight = max(0.5, 1.0 - ch_dist * 0.01) if ch_dist > 0 else 1.0
+            # 章节权重：离当前章越近越高
+            ch_dist = current - item["chapter"] if current > 0 else 0
+            chapter_weight = max(0.5, 1.0 - ch_dist * 0.05) if ch_dist > 0 else 1.0
 
             # 实体权重
             ent_bonus = 0.0

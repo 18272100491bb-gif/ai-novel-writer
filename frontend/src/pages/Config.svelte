@@ -496,7 +496,8 @@
   <div class="card bg-base-200 shadow-sm">
     <div class="card-body p-4 gap-2">
       <h3 class="card-title text-base">{$t('config.synopsis.title')}</h3>
-      <textarea class="textarea w-full h-40 text-base" bind:value={localStoryCfg.story_synopsis} placeholder={$t('config.synopsis.placeholder')} disabled={$taskRunning}></textarea>
+      <p class="text-xs text-base-content/50">简明故事梗概，用于AI生成大纲。需上传完整大纲请到「大纲」页面使用手动创建功能。</p>
+      <textarea class="textarea w-full h-28 text-base" bind:value={localStoryCfg.story_synopsis} placeholder="简明描述你的故事背景和主线（完整大纲请到大纲页面上传）" disabled={$taskRunning}></textarea>
       <div class="flex justify-end">
         <button class="btn btn-primary btn-xs" on:click={saveStoryConfig} disabled={$taskRunning}>{$t('common.save')}</button>
       </div>

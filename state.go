@@ -7,13 +7,21 @@ import (
 	"path/filepath"
 )
 
+type GateReport struct {
+	Gate    string   `json:"gate"`    // "fact_check" | "gate7" | "gate8"
+	Passed  bool     `json:"passed"`
+	Issues  []string `json:"issues"`
+	Summary string   `json:"summary"`
+}
+
 type ChapterState struct {
-	Num     int    `json:"num"`
-	Title   string `json:"title"`
-	Outline string `json:"outline"`
-	Content string `json:"content"`
-	Summary string `json:"summary"`
-	Status  string `json:"status"` // pending | writing | review | accepted
+	Num         int          `json:"num"`
+	Title       string       `json:"title"`
+	Outline     string       `json:"outline"`
+	Content     string       `json:"content"`
+	Summary     string       `json:"summary"`
+	Status      string       `json:"status"` // pending | writing | review | accepted
+	GateReports []GateReport `json:"gate_reports,omitempty"`
 }
 
 type ForeshadowStatus string
@@ -95,7 +103,6 @@ type Progress struct {
 	PendingWritingConflict      *WritingConflict         `json:"pending_writing_conflict,omitempty"`
 	MemoryEntries               []MemoryEntry            `json:"memory_entries,omitempty"`
 	MemoryMaxTokens             int             `json:"memory_max_tokens,omitempty"`
-	OutlineNodes                []OutlineNode   `json:"outline_nodes,omitempty"`
 	ProjectDir                  string          `json:"-"`
 }
 

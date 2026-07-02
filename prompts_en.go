@@ -123,38 +123,65 @@ Use exactly this format:
 
 Important: Total length (including all labels) must not exceed 500 characters. Compress each field; avoid redundant description.`,
 
-	FactCheck: `You are a strict novel fact-checker. Your task is to detect objective factual contradictions in the chapter.
+	FactCheck: `You are a rigorous chapter acceptance inspector, checking for factual contradictions and writing quality issues in novel chapters.
 
-Check whether the chapter below contradicts the story-so-far or the outline arc.
+Please inspect this chapter across three dimensions:
 
-[Story-so-far]
+【Plot Summary】
 {{.HistorySummary}}
 
-[Chapter outline]
+【Chapter Outline】
 {{.ChapterOutline}}
 
-{{.OutlineConstraints}}{{.Memory}}[Chapter under review]
+{{.OutlineConstraints}}{{.Memory}}【Chapter Content】
 {{.ChapterContent}}
 
-Scope (only the following count as problems, nothing else):
-1. Character names or honorifics inconsistent with prior text.
-2. Timeline contradictions (e.g. previous text ended at night, this chapter inexplicably reverts to morning of the same day).
-3. Facts that directly contradict established events (a dead character reappearing without explanation, a destroyed object intact again).
-4. Character abilities or identity directly clashing with established setting.
-5. Premature introduction of characters, first meetings, identity reveals, or other events that the outline assigns to later chapters.
-6. One-time events already played out in prior chapters being re-enacted as new in this chapter.
+=== Dimension 1: Fact Check ===
+Check for objective contradictions:
+1. Inconsistent character names/forms of address
+2. Timeline errors (e.g. night becomes same-day morning without explanation)
+3. Facts that contradict established history (e.g. a dead character reappears)
+4. Character abilities/identities in direct conflict with established settings
+5. Premature introduction of characters/events scheduled for later chapters
+6. One-time events (first meetings, identity reveals) repeated as new
 
-Notes:
-- Style, pacing, scene-length choices, and plot plausibility are subjective issues — always PASS them.
-- New information that neither the story-so-far nor the outline mentions is not a contradiction.
-- Only solid objective contradictions warrant FAIL. When in doubt, PASS.
+Note: Subjective style/pace issues are NOT fact errors. When unsure, always PASS.
 
-Return JSON only (no other text):
-{"result": "PASS", "issues": []}
-or
-{"result": "FAIL", "issues": ["concrete contradiction 1", "concrete contradiction 2"]}`,
+=== Dimension 2: Emotional Redundancy (Gate 7) ===
+Check each sentence for whether it adds new specific information:
+7.1 Same emotion stated multiple times with no new info
+7.2 Abstract emotion word wrapping concrete action (e.g. "a wave of sadness washed over him" + "tears blurred his vision" → former FAIL)
+7.3 Scene description followed by unnecessary emotional summary
+7.4 Emotion already conveyed through action/dialogue, repeated as inner monologue
+7.5 Generic emotional metaphors with no scene-specificity (e.g. "like a mixed blessing")
+7.6 Character states opinion, then adds inner monologue explaining it
+7.7 Same emotion point repeated across paragraphs without new trigger
 
-	OutlineRevision: `You are a novel-planning editor. The user gave revision feedback on the outline. Revise accordingly.
+Note: Intentional repetition for rhythm (parallelism) is exempt. Similar emotion triggered by a NEW event is exempt.
+
+=== Dimension 3: Rhetorical Awareness (Gate 8) ===
+Check if rhetorical devices match the scene's emotional tone and narrative rhythm:
+8.1 Rhetoric consistent with scene tone (happy scene using dark rhetoric → FAIL)
+8.2 Rhetoric too grand or too plain for the scene's intensity
+8.3 Excessive rhetorical density in same paragraph (3+ consecutive sentences of metaphor/parallelism)
+8.4 Character-specific rhetoric matches their identity and education
+8.5 Rhetoric serves narrative purpose (not just "writing beautifully" without advancing plot or atmosphere)
+
+Note: Rhetorical taste is subjective. When unsure, always PASS.
+
+Return ONLY valid JSON:
+{
+  "result": "PASS",
+  "issues": [],
+  "gates": [
+    {"gate": "fact_check", "passed": true, "issues": []},
+    {"gate": "gate7", "passed": true, "issues": []},
+    {"gate": "gate8", "passed": true, "issues": []}
+  ]
+}
+result is PASS only when all three dimensions PASS. Any dimension FAIL makes result FAIL. Report issues per dimension.`,
+
+	OutlineRevision: `You are a novel planning editor. The user has feedback on the current outline. Please revise
 
 [Current outline]
 {{.CurrentOutline}}
@@ -320,7 +347,41 @@ Rules:
 3. Cover opening scene, core conflict, turning point, characters with roles, and ending hook.
 4. Prefer [Registered characters]; mark new ones with "first appearance" plus a one-line description.
 5. One-time events already used in prior chapters (first meeting, identity reveal, etc.) must not be re-scheduled.
-6. Output strict JSON only.`,
+Return JSON only, no extra text.`,
+
+	OutlineParse: `You are a strict story-settings analyst. Extract characters, world-building entries, organizations, and foreshadows from the complete story synopsis.
+
+[Full Synopsis]
+{{.FullSynopsis}}
+
+Return JSON:
+{
+  "characters": [
+    {"name": "...", "age": "", "appearance": "", "personality": "", "background": "", "motivation": "", "abilities": "", "notes": ""}
+  ],
+  "worldview": [
+    {"category": "...", "name": "...", "description": "...", "tags": "..."}
+  ],
+  "organizations": [
+    {"name": "...", "type": "...", "description": "...", "members": []}
+  ],
+  "foreshadows": [
+    {"name": "...", "description": "...", "plant_chapter": 0, "target_chapter": 0}
+  ],
+  "relations": [
+    {"source": "...", "target": "...", "label": "...", "relation": "..."}
+  ]
+}
+
+Fields:
+- worldview.category: one of geography, faction, rule, history, other
+- organization.type: e.g. sect/guild/nation/clan
+- relations: character-character or character-organization relationships (master-disciple, rival, father-son, ally, etc.)
+
+Rules:
+1. Only extract explicitly mentioned information — do not invent
+2. Leave fields blank if no clear info in the synopsis
+3. Output strict JSON only, no extra text`,
 
 	OutlineCharacterCheck: `You are a strict story-settings editor. Compare characters appearing in the full chapter outline against the registered character list.
 

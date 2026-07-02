@@ -68,6 +68,7 @@ type mem0SearchRequest struct {
 	TopK            int                `json:"top_k"`
 	ExcludeChapters []int              `json:"exclude_chapters"`
 	Weights         map[string]float64 `json:"weights,omitempty"`
+	CurrentChapter  int                `json:"current_chapter"`
 }
 
 type mem0SearchResult struct {
@@ -148,18 +149,19 @@ func Mem0Add(ctx context.Context, progressPath string, chapter int, memory, cate
 // 检索记忆（含系统B人格prompt格式化）
 // ---------------------------------------------------------------------------
 
-func Mem0Search(progressPath string, query string, topK int, exclude []int, weights map[string]float64) string {
+func Mem0Search(progressPath string, query string, topK int, exclude []int, weights map[string]float64, currentChapter int) string {
 	initMem0()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	req := mem0SearchRequest{
-		ProjectID:       projectIDFromPath(progressPath),
-		Query:           query,
-		TopK:            topK,
-		ExcludeChapters: exclude,
-		Weights:         weights,
-	}
+		req := mem0SearchRequest{
+			ProjectID:       projectIDFromPath(progressPath),
+			Query:           query,
+			TopK:            topK,
+			ExcludeChapters: exclude,
+			Weights:         weights,
+			CurrentChapter:  currentChapter,
+		}
 	body, err := json.Marshal(req)
 	if err != nil {
 		return ""

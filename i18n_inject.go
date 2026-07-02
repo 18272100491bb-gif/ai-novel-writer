@@ -279,14 +279,19 @@ func buildColdMemoryBlock(state *Progress, idx int) string {
 		return ""
 	}
 
-	// 构建查询：用当前章节的标题+大纲作为搜索query
+	// 构建查询：用当前章节的标题+大纲+摘要作为搜索query
 	query := ""
+	var currentChNum int
 	if idx >= 0 && idx < len(state.Chapters) {
 		ch := state.Chapters[idx]
 		query = ch.Title
 		if ch.Outline != "" {
 			query += " " + ch.Outline
 		}
+		if ch.Summary != "" {
+			query += " " + ch.Summary
+		}
+		currentChNum = ch.Num
 	}
 	if query == "" {
 		return ""
@@ -298,7 +303,7 @@ func buildColdMemoryBlock(state *Progress, idx int) string {
 		exclude = append(exclude, state.Chapters[idx].Num)
 	}
 
-	result := Mem0Search(state.ProjectDir, query, 15, exclude, mem0EntityWeights)
+		result := Mem0Search(state.ProjectDir, query, 15, exclude, mem0EntityWeights, currentChNum)
 	if result == "" {
 		return ""
 	}

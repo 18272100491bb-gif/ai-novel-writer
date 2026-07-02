@@ -522,6 +522,32 @@
                 </div>
               {/if}
 
+              {#if ch.gate_reports && ch.gate_reports.length > 0}
+                <div class="bg-base-300 rounded-lg p-3 space-y-1.5">
+                  <h4 class="text-xs font-medium text-base-content/70 mb-1">验收报告</h4>
+                  {#each ch.gate_reports as report}
+                    <div class="flex items-start gap-2">
+                      <span class="text-xs shrink-0 mt-0.5 {report.passed ? 'text-success' : 'text-error'}">{report.passed ? '✓' : '✗'}</span>
+                      <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-1.5">
+                          <span class="text-xs font-medium">
+                            {report.gate === 'fact_check' ? '事实核查' : report.gate === 'gate7' ? '情绪冗余' : '修辞自觉'}
+                          </span>
+                          <span class="text-xs {report.passed ? 'text-success' : 'text-error'}">{report.passed ? 'PASS' : 'FAIL'}</span>
+                        </div>
+                        {#if report.issues && report.issues.length > 0}
+                          <ul class="text-xs text-base-content/60 mt-0.5 space-y-0.5 list-disc list-inside">
+                            {#each report.issues as issue}
+                              <li>{issue}</li>
+                            {/each}
+                          </ul>
+                        {/if}
+                      </div>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+
               <!-- 操作 -->
               <div class="flex gap-2 flex-wrap items-center mt-1">
                 {#if ch.status === 'pending' && isCurrent}

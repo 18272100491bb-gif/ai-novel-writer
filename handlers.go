@@ -748,7 +748,8 @@ func (h *Handlers) PostChapterGenerate(w http.ResponseWriter, r *http.Request) {
 			if !h.isAutoConfirmOn() {
 				break
 			}
-			if err := ConfirmChapterAction(h.state, h.progressPath); err != nil {
+			h.logger.InfoKey("log.chapter_autoconfirming", chIdx+1, chTitle)
+			if err := ConfirmChapterActionAsync(ctx, h.apiCfg, h.cfg, h.state, h.progressPath, h.settings, h.logger); err != nil {
 				h.logger.WarnKey("log.chapter_autoconfirm_failed", err)
 				break
 			}
@@ -870,15 +871,30 @@ func (h *Handlers) PostChapterConfirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := ConfirmChapterAction(h.state, h.progressPath); err != nil {
-		h.writeErrorReq(w, r, http.StatusBadRequest, "invalid_json", err.Error())
+	if !h.tryStartTask() {
+		h.writeErrorReq(w, r, http.StatusConflict, "task_running_wait")
 		return
 	}
 
-	ch := h.state.Chapters[h.state.CurrentChapterIndex-1]
-	h.logger.SuccessKey("log.chapter_confirmed", ch.Num)
-	h.broadcastProgress()
-	h.writeJSON(w, http.StatusOK, h.state)
+	go func() {
+		defer h.endTask()
+		h.logger.TaskStart("chapter_confirm")
+
+		err := ConfirmChapterActionAsync(r.Context(), h.apiCfg, h.cfg, h.state, h.progressPath, h.settings, h.logger)
+		if err != nil {
+			h.logger.ErrorKey("log.chapter_confirm_failed", err)
+			h.logger.TaskEnd("chapter_confirm", false)
+			h.broadcastProgress()
+			return
+		}
+
+		ch := h.state.Chapters[h.state.CurrentChapterIndex-1]
+		h.logger.SuccessKey("log.chapter_confirmed", ch.Num)
+		h.logger.TaskEnd("chapter_confirm", true)
+		h.broadcastProgress()
+	}()
+
+	h.writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
 }
 
 func (h *Handlers) PostChapterEdit(w http.ResponseWriter, r *http.Request) {
@@ -1293,6 +1309,57 @@ func (h *Handlers) PostOutlineChapters(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.SuccessKey("log.chapter_added", nextNum)
 	h.writeJSON(w, http.StatusOK, h.state)
+}
+
+// PostOutlineParse 从完整大纲中提取设定信息到角色/世界观/组织/伏笔接口
+func (h *Handlers) PostOutlineParse(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureProject(w, r) {
+		return
+	}
+	if !h.tryStartTask() {
+		h.writeErrorReq(w, r, http.StatusConflict, "task_running_wait")
+		return
+	}
+
+	go func() {
+		defer h.endTask()
+		h.logger.TaskStart("outline_parse")
+		h.logger.InfoKey("log.outline_parse_start")
+		ctx := h.taskCtx
+
+		err := ParseOutlineAction(ctx, h.apiCfg, h.cfg, h.state, h.settings, h.logger)
+		if err != nil {
+			if ctx.Err() != nil {
+				h.logger.WarnKey("log.task_cancelled")
+				h.logger.TaskEnd("outline_parse", false)
+			} else {
+				h.logger.ErrorKey("log.outline_parse_failed", err)
+				h.logger.TaskEnd("outline_parse", false)
+			}
+			return
+		}
+
+		// 保存 settings 和 progress
+		if err := SaveProjectSettings(h.settingsPath, h.settings); err != nil {
+			h.logger.ErrorKey("log.settings_save_failed", err)
+			h.logger.TaskEnd("outline_parse", false)
+			return
+		}
+		if err := SaveProgress(h.progressPath, h.state); err != nil {
+			h.logger.ErrorKey("log.progress_save_failed", err)
+			h.logger.TaskEnd("outline_parse", false)
+			return
+		}
+
+		h.logger.SuccessKey("log.outline_parse_done",
+			len(h.settings.Characters), len(h.settings.Worldview),
+			len(h.settings.Organizations), len(h.state.Foreshadows))
+		h.logger.TaskEnd("outline_parse", true)
+		h.logger.SettingsUpdated()
+		h.broadcastProgress()
+	}()
+
+	h.writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
 }
 
 func (h *Handlers) PostSettingsReconcile(w http.ResponseWriter, r *http.Request) {

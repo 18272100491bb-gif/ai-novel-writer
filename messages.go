@@ -52,6 +52,14 @@ var messageCatalog = map[string]map[string]string{
 		LangZH: "大纲已修订。",
 		LangEN: "Outline revised.",
 	},
+	"log.outline_parse_start": {
+		LangZH: "正在从完整大纲中提取设定信息...",
+		LangEN: "Extracting settings from full synopsis...",
+	},
+	"log.outline_parse_done": {
+		LangZH: "设定提取完成：%d 个角色，%d 个世界观条目，%d 个组织，%d 个伏笔",
+		LangEN: "Parsed %d characters, %d world entries, %d organizations, %d foreshadows",
+	},
 	"log.chapter_writing": {
 		LangZH: "正在创作第 %d 章...",
 		LangEN: "Writing chapter %d...",
@@ -687,6 +695,10 @@ var messageCatalog = map[string]map[string]string{
 	"agent.chapter_task_started": {
 		LangZH: "第 %d 章生成任务已启动，请等待完成。",
 		LangEN: "Chapter %d generation started — please wait.",
+	},
+	"agent.chapter_confirm_started": {
+		LangZH: "章节确认任务已启动（正在生成摘要、更新伏笔、追加记忆），请等待完成。",
+		LangEN: "Chapter confirmation started (generating summary, updating foreshadows & memory) — please wait.",
 	},
 	"agent.chapter_confirmed": {
 		LangZH: "第 %d 章《%s》已确认。",
