@@ -89,7 +89,7 @@ We introduced `/api/outline/parse`: full outline is extracted into five structur
 ## Quick Start
 
 ```bash
-git clone https://github.com/18272100491bb-gif/ai-novel-writer.git
+git clone <repo-url>
 cd show-me-the-story
 go build -o show-me-the-story .
 ./show-me-the-story
