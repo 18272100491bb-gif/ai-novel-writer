@@ -29,3 +29,4 @@ storys/
 *.test.exe
 Thumbs.db
 .vscode/
+start.sh
